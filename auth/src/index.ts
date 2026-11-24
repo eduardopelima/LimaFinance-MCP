@@ -41,6 +41,6 @@ export default class AuthServer extends WorkerEntrypoint<Env> {
   async validateToken(resource: string, token: string) {
     const v = await authorizationServer.validateToken<AuthProps>(resource, token, this.env);
     if (!v) return null;
-    return { email: v.props.email, name: v.props.name ?? null, scope: v.scope, clientId: v.clientId, expiresAt: v.expiresAt, audience: v.audience };
+    return { email: v.props.email, name: v.props.name ?? null, googleSub: v.props.googleSub ?? null, scope: v.scope, clientId: v.clientId, expiresAt: v.expiresAt, audience: v.audience };
   }
 }

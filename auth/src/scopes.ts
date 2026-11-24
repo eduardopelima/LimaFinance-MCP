@@ -5,4 +5,6 @@ export const SCOPE_WRITE = "mcp:write";
 export interface AuthProps {
   email: string;
   name?: string;
+  /** Claim `sub` do Google: identidade estável. Ausente no login dev e em grants antigos. */
+  googleSub?: string;
 }

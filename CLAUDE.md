@@ -127,7 +127,10 @@ exige as portas 8787/8788 livres, então pare os `wrangler dev` antes).
 - Escopos: `mcp:read` (obrigatório), `mcp:write`, `offline_access`. Allowlist: `ALLOWED_EMAILS`, secret do Worker de auth
   (local: `auth/.dev.vars`; remoto: `wrangler secret put ALLOWED_EMAILS --env <env>`). Nunca coloque e-mails em arquivo versionado.
 - Login: Google OIDC. Login dev: só com `DEV_LOGIN=true` **e** host loopback.
-- O grant guarda só `{email, name}`. O Python cria/acha o usuário pelo e-mail em cada validação (`upsert_user`).
+- O grant guarda só `{email, name, googleSub}`. O Python resolve o usuário em cada validação (`auth.upsert_user`):
+  **`google_sub` é a identidade** (e-mail pode mudar/ser reaproveitado). Ordem: acha pelo sub (atualiza e-mail) → acha pelo
+  e-mail sem sub e liga → e-mail com OUTRO sub = `IdentityConflict` (401) → cria. Sem sub (login dev, grant antigo, PAT): pelo e-mail.
+  O `user_id` (`usr_...`) é interno e nunca muda; nunca derive identidade de parâmetro de tool.
 - `MCP_RESOURCE` tem que ser idêntico nos dois Workers e igual à URL que os clientes usam (os tokens ficam presos a ela).
 
 ## Estilo

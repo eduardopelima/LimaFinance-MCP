@@ -21,10 +21,52 @@ from .lib.ids import new_id, sha256_hex
 PAT_PREFIX = "lf_pat_"
 
 
-async def upsert_user(db: DB, email: str, name: str | None = None) -> dict[str, Any]:
+class IdentityConflict(Exception):
+    """O e-mail já pertence a OUTRA conta Google (outro `sub`): e-mail reaproveitado. Login recusado."""
+
+
+_USER_COLS = "id, email, timezone, google_sub"
+
+
+async def upsert_user(db: DB, email: str, name: str | None = None, google_sub: str | None = None) -> dict[str, Any]:
+    """Resolve o usuário do banco a partir da identidade autenticada.
+
+    Com `google_sub` (login Google), ele é a identidade estável:
+      1. existe usuário com esse sub → é ele (o e-mail é atualizado se mudou na conta Google);
+      2. senão, existe usuário com esse e-mail e SEM sub (criado por e-mail/import/PAT) → liga o sub a ele;
+      3. o e-mail pertence a usuário com OUTRO sub → IdentityConflict (não herda dados de ninguém);
+      4. nada → cria.
+    Sem `google_sub` (login dev, grants antigos, PAT): identidade pelo e-mail, como antes.
+    """
     normalized = email.strip().lower()
+    if google_sub:
+        row = await db.first(f"SELECT {_USER_COLS} FROM users WHERE google_sub = ?", google_sub)
+        if row:
+            if row["email"] != normalized:
+                taken = await db.first("SELECT id FROM users WHERE email = ? AND id <> ?", normalized, row["id"])
+                if taken:  # outro usuário já usa o e-mail novo: mantém o antigo e avisa no log
+                    print(f"identity_email_change_blocked: user={row['id']}")
+                else:
+                    await db.run("UPDATE users SET email = ? WHERE id = ?", normalized, row["id"])
+                    row["email"] = normalized
+            return row
+        row = await db.first(f"SELECT {_USER_COLS} FROM users WHERE email = ?", normalized)
+        if row:
+            if row["google_sub"] and row["google_sub"] != google_sub:
+                raise IdentityConflict(f"email pertence a outra conta Google (user={row['id']})")
+            await db.run("UPDATE users SET google_sub = ? WHERE id = ? AND google_sub IS NULL", google_sub, row["id"])
+            row["google_sub"] = google_sub
+            return row
+        await db.run(
+            "INSERT INTO users (id, email, name, google_sub) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            new_id("usr"), normalized, name, google_sub,
+        )
+        row = await db.first(f"SELECT {_USER_COLS} FROM users WHERE google_sub = ?", google_sub)
+        assert row is not None
+        return row
+
     await db.run("INSERT INTO users (id, email, name) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING", new_id("usr"), normalized, name)
-    row = await db.first("SELECT id, email, timezone FROM users WHERE email = ?", normalized)
+    row = await db.first(f"SELECT {_USER_COLS} FROM users WHERE email = ?", normalized)
     assert row is not None
     return row
 
@@ -69,7 +111,11 @@ class LimaTokenVerifier:
         v = await self._env.AUTH.validateToken(self._resource, token)
         if not v:
             return None
-        user = await upsert_user(self._db, v["email"], v.get("name"))
+        try:
+            user = await upsert_user(self._db, v["email"], v.get("name"), v.get("googleSub"))
+        except IdentityConflict as e:
+            print(f"auth_identity_conflict: {e}")
+            return None  # 401: o cliente não ganha acesso aos dados de outra pessoa
         return AccessToken(
             token=token,
             client_id=str(v["clientId"]),

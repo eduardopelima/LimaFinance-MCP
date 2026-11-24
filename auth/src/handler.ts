@@ -69,7 +69,7 @@ async function submitConsent(request: Request, env: Env, oauth: OAuthHelpers): P
   if (method === "dev") {
     if (!devLoginEnabled(env, request)) return html("<h1>Login de desenvolvimento desativado</h1>", 403);
     const email = String(form.get("email") ?? "").trim();
-    return finish(oauth, approved.request, email, undefined, approved.headers, env);
+    return finish(oauth, approved.request, email, undefined, undefined, approved.headers, env);
   }
 
   if (method === "google") {
@@ -94,7 +94,7 @@ async function googleCallback(request: Request, env: Env, oauth: OAuthHelpers): 
     return new Response(null, { status: 302, headers });
   }
   const google = await exchangeGoogleCode(env, request, code, data.verifier);
-  return finish(oauth, original, google.email, google.name, headers, env);
+  return finish(oauth, original, google.email, google.name, google.sub, headers, env);
 }
 
 async function finish(
@@ -102,6 +102,7 @@ async function finish(
   authReq: AuthRequest,
   email: string,
   name: string | undefined,
+  googleSub: string | undefined,
   headers: Headers,
   env: Env,
 ): Promise<Response> {
@@ -113,11 +114,11 @@ async function finish(
     );
   }
   const normalized = email.trim().toLowerCase();
-  const props: AuthProps = { email: normalized, name };
+  const props: AuthProps = { email: normalized, name, googleSub };
   const { redirectTo } = await oauth.completeAuthorization({
     request: authReq,
-    // userId não pode conter ":" (separador interno da lib).
-    userId: encodeURIComponent(normalized),
+    // Chave do grant no KV (interna da lib; NÃO é o user_id do banco). Não pode conter ":".
+    userId: googleSub ? `g_${googleSub}` : encodeURIComponent(normalized),
     metadata: { email: normalized },
     scope: authReq.scope,
     props,

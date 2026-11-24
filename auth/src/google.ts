@@ -33,7 +33,7 @@ export async function exchangeGoogleCode(
   request: Request,
   code: string,
   verifier: string,
-): Promise<{ email: string; name?: string }> {
+): Promise<{ sub: string; email: string; name?: string }> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -52,13 +52,15 @@ export async function exchangeGoogleCode(
   // id_token recebido diretamente do token endpoint do Google via TLS: OIDC Core 3.1.3.7
   // permite confiar no canal em vez de validar a assinatura. Ainda checamos iss/aud/exp/email_verified.
   const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(body.id_token.split(".")[1]!))) as {
-    iss: string; aud: string; exp: number; email?: string; email_verified?: boolean; name?: string;
+    iss: string; aud: string; exp: number; sub?: string; email?: string; email_verified?: boolean; name?: string;
   };
   if (!["https://accounts.google.com", "accounts.google.com"].includes(claims.iss)) throw new Error("google_bad_iss");
   if (claims.aud !== env.GOOGLE_CLIENT_ID) throw new Error("google_bad_aud");
   if (claims.exp * 1000 < Date.now()) throw new Error("google_expired");
   if (!claims.email || claims.email_verified !== true) throw new Error("google_email_not_verified");
-  return { email: claims.email, name: claims.name };
+  // `sub` é o ID estável da conta Google (o e-mail pode mudar ou ser reaproveitado).
+  if (!claims.sub || !/^[0-9]{1,64}$/.test(claims.sub)) throw new Error("google_bad_sub");
+  return { sub: claims.sub, email: claims.email, name: claims.name };
 }
 
 function b64url(bytes: Uint8Array): string {
