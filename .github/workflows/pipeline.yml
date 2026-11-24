@@ -1,0 +1,135 @@
+name: pipeline
+
+# PR        → test + e2e + bundle
+# push main → test + e2e + bundle → staging (deploy + verificação) → production (deploy + verificação)
+# Verificação pós-deploy falhou → rollback automático do código daquele ambiente e o pipeline para.
+#
+# Configuração do deploy (nada fica no código; ver README "Deploy your own"):
+#   Repo variable  DEPLOY_ENABLED=true            liga os jobs de deploy (forks ficam só com CI)
+#   Repo secrets   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+#   Environments   staging / production → Variables: LF_PREFIX, CF_WORKERS_SUBDOMAIN, GOOGLE_CLIENT_ID,
+#                  D1_ID_<ENV>, KV_ID_<ENV> · Secret (opcional): SMOKE_TOKEN (PAT só-leitura)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # PRs: cancela a execução anterior. main: enfileira (nunca dois deploys ao mesmo tempo).
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: testes + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: pytest (mcp + gerador de config)
+        working-directory: mcp
+        run: uv run pytest -q
+      - name: gerar config local
+        run: uv run --no-project ci/render_config.py
+      - name: typecheck (auth)
+        working-directory: auth
+        run: |
+          cp .dev.vars.example .dev.vars   # wrangler types lê os nomes dos segredos daqui
+          npx wrangler types
+          npx tsc --noEmit
+
+  e2e:
+    name: e2e local (OAuth + MCP + Queue)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: pywrangler sync (pacotes Pyodide)
+        working-directory: mcp
+        run: uv run pywrangler sync
+      - run: bash ci/e2e.sh
+      - name: logs dos Workers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: .wrangler/e2e-logs/
+          retention-days: 7
+
+  bundle:
+    name: bundle Python (dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: dry-run do deploy + limite de tamanho
+        run: |
+          uv run --no-project ci/render_config.py
+          cd mcp
+          uv run pywrangler deploy --dry-run --outdir ../.wrangler/dryrun | tee ../.wrangler/dryrun.log
+          kib=$(grep -oP 'Total Upload: \K[0-9.]+' ../.wrangler/dryrun.log)
+          echo "bundle: ${kib} KiB (limite 64 MiB = 65536 KiB)"
+          awk -v k="$kib" 'BEGIN { exit !(k < 60000) }' || { echo "::error::bundle perto/acima do limite de 64 MiB"; exit 1; }
+
+  deploy-staging:
+    name: deploy staging
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    needs: [test, e2e, bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: staging
+    env: &deploy-env
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LF_PREFIX: ${{ vars.LF_PREFIX }}
+      CF_WORKERS_SUBDOMAIN: ${{ vars.CF_WORKERS_SUBDOMAIN }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      D1_ID_STAGING: ${{ vars.D1_ID_STAGING }}
+      KV_ID_STAGING: ${{ vars.KV_ID_STAGING }}
+      D1_ID_PRODUCTION: ${{ vars.D1_ID_PRODUCTION }}
+      KV_ID_PRODUCTION: ${{ vars.KV_ID_PRODUCTION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: deploy (config → migrations → auth → mcp)
+        id: deploy
+        run: bash ci/deploy.sh staging
+      - name: verificação pós-deploy
+        working-directory: mcp
+        run: uv run scripts/check_deploy.py --env staging ${SMOKE_TOKEN:+--token "$SMOKE_TOKEN"}
+        env:
+          SMOKE_TOKEN: ${{ secrets.SMOKE_TOKEN }}
+      - name: rollback
+        if: failure() && steps.deploy.outcome != 'skipped'
+        run: bash ci/rollback.sh staging
+
+  deploy-production:
+    name: deploy production
+    needs: [deploy-staging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    env: *deploy-env
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: deploy (config → migrations → auth → mcp)
+        id: deploy
+        run: bash ci/deploy.sh production
+      - name: verificação pós-deploy
+        working-directory: mcp
+        run: uv run scripts/check_deploy.py --env production ${SMOKE_TOKEN:+--token "$SMOKE_TOKEN"}
+        env:
+          SMOKE_TOKEN: ${{ secrets.SMOKE_TOKEN }}
+      - name: rollback
+        if: failure() && steps.deploy.outcome != 'skipped'
+        run: bash ci/rollback.sh production

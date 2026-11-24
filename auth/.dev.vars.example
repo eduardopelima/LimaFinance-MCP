@@ -1,0 +1,8 @@
+# Copie para auth/.dev.vars (nunca commitado).
+ISSUER=http://localhost:8788
+MCP_RESOURCE=http://localhost:8787/mcp
+ALLOWED_EMAILS=voce@exemplo.com
+# Login de desenvolvimento: só funciona com DEV_LOGIN=true E host localhost/127.0.0.1.
+DEV_LOGIN=true
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=

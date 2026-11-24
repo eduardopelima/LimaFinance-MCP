@@ -1,0 +1,23 @@
+name: setup
+description: Node + uv (com cache) e dependências de auth/ e mcp/
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: auth/package-lock.json
+    - uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.13.9" # pywrangler exige uv >= 0.13.4
+        enable-cache: true
+        cache-dependency-glob: mcp/uv.lock
+    - name: npm ci (auth)
+      shell: bash
+      working-directory: auth
+      run: npm ci
+    - name: uv sync (mcp)
+      shell: bash
+      working-directory: mcp
+      run: uv sync --locked

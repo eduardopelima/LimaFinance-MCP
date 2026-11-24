@@ -1,0 +1,25 @@
+node_modules/
+.wrangler/
+.venv/
+.venv-workers/
+python_modules/
+__pycache__/
+.pytest_cache/
+*.log
+
+# configuração do SEU deploy (gerada/preenchida localmente)
+*.env
+!*.env.example
+**/.dev.vars
+**/.dev.vars.*
+!**/.dev.vars.example
+auth/wrangler.jsonc
+mcp/wrangler.jsonc
+auth/worker-configuration.d.ts
+
+# dados financeiros reais: exports da planilha e SQL gerado
+data/
+mcp/data/
+mcp/import-out/
+*.csv
+!mcp/scripts/exemplo-planilha.csv

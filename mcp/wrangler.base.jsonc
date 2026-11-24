@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // BASE versionada. O arquivo usado pelo wrangler (mcp/wrangler.jsonc) é GERADO por `ci/render_config.py`
+  // a partir desta base + limafinance.env (ou variáveis do GitHub no CI). Edite aqui, nunca o gerado.
+  // Este topo é o ambiente de desenvolvimento local; staging/production são acrescentados pelo gerador.
+  "name": "limafinance-local",
+  "main": "src/entry.py",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["python_workers"],
+  "observability": { "enabled": true },
+
+  "vars": {
+    "MCP_RESOURCE": "http://localhost:8787/mcp",
+    "AUTH_ISSUER": "http://localhost:8788"
+  },
+  // Authorization server (Worker TS). Chamado só via RPC: AUTH.validateToken(resource, token).
+  "services": [{ "binding": "AUTH", "service": "limafinance-auth" }],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "limafinance", "database_id": "local", "migrations_dir": "../migrations" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "limafinance-jobs" }],
+    "consumers": [
+      { "queue": "limafinance-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 3, "dead_letter_queue": "limafinance-jobs-dlq" }
+    ]
+  },
+  // 03:00 UTC = 00:00 em America/Sao_Paulo. Diário e idempotente.
+  "triggers": { "crons": ["0 3 * * *"] }
+}

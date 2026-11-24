@@ -1,0 +1,22 @@
+[project]
+name = "limafinance"
+version = "0.2.0"
+description = "Servidor MCP remoto de controle financeiro pessoal (Cloudflare Python Worker + D1)."
+requires-python = ">=3.12"
+dependencies = [
+  "mcp>=2,<3",        # SDK oficial MCP (MCPServer, ex-FastMCP), modo HTTP stateless
+  "pydantic>=2.10",   # schemas das tools (equivalente ao zod)
+  "tzdata",           # base de fusos p/ zoneinfo (America/Sao_Paulo) no Pyodide
+]
+
+[dependency-groups]
+dev = [
+  "workers-py",            # pywrangler: sync/dev/deploy
+  "workers-runtime-sdk",   # tipos do módulo `workers`
+  "pytest>=8",
+  "httpx",                 # smoke test
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "scripts"]

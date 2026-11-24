@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // BASE versionada. O arquivo usado pelo wrangler (auth/wrangler.jsonc) é GERADO por `ci/render_config.py`
+  // a partir desta base + limafinance.env (ou variáveis do GitHub no CI). Edite aqui, nunca o gerado.
+  // Este topo é o ambiente de desenvolvimento local; staging/production são acrescentados pelo gerador.
+  "name": "limafinance-auth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // global_fetch_strictly_public: exigido para CIMD (buscar o documento do client_id na internet pública)
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+
+  // Segredos (nunca aqui): GOOGLE_CLIENT_SECRET, ALLOWED_EMAILS. Local: auth/.dev.vars.
+  "vars": {
+    "ISSUER": "http://localhost:8788",
+    "MCP_RESOURCE": "http://localhost:8787/mcp",
+    "GOOGLE_CLIENT_ID": "",
+    "DEV_LOGIN": "false"
+  },
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "local" }]
+}

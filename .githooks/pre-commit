@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Barreira contra vazamento num repositório PÚBLICO. Ative uma vez por clone:
+#   git config core.hooksPath .githooks
+# Bloqueia: arquivos de configuração/segredo, exports da planilha, SQL gerado e tokens no conteúdo.
+set -euo pipefail
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+[ -z "$staged" ] && exit 0
+fail=0
+
+while IFS= read -r f; do
+  case "$f" in
+    *.env.example|*.dev.vars.example|mcp/scripts/exemplo-planilha.csv) continue ;;
+    *.env|*/.dev.vars|.dev.vars|*.dev.vars.*|*.csv|*/import-out/*|data/*|*/data/*|*/wrangler.jsonc)
+      echo "✘ pre-commit: '$f' não deve ir para o git (config local, segredo ou dado financeiro)."; fail=1 ;;
+  esac
+done <<<"$staged"
+
+# Conteúdo: PATs, chaves privadas e tokens comuns (só nas linhas adicionadas).
+if git diff --cached -U0 | grep -E '^\+' | grep -vE '^\+\+\+' \
+   | grep -nE 'lf_pat_[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|GOCSPX-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{30,}' ; then
+  echo "✘ pre-commit: parece haver um token/segredo nas linhas acima."; fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "Corrija (git restore --staged <arquivo>) ou, se tiver certeza absoluta, use --no-verify."
+  exit 1
+fi
