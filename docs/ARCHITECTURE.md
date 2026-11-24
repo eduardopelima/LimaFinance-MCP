@@ -2,6 +2,13 @@
 
 ## Visão geral
 
+![Arquitetura do limafinance](architecture/overview.svg)
+
+Fluxos: [conectar (OAuth)](architecture/flows/1-conectar.svg) · [registrar um gasto](architecture/flows/2-registrar.svg) ·
+[recorrências](architecture/flows/3-recorrencias.svg). Gerados por [`architecture/draw.py`](architecture/draw.py).
+
+Versão em texto:
+
 ```
  Claude (web/desktop/Code) ─┐                        ┌─────────────────────────────────────────────┐
  ChatGPT (dev mode)        ─┼── HTTPS /mcp ─────────▶│ Worker "limafinance" (PYTHON)               │
