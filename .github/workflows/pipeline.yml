@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: pytest (mcp + gerador de config)
         working-directory: mcp
@@ -48,15 +48,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: pywrangler sync (pacotes Pyodide)
-        working-directory: mcp
-        run: uv run pywrangler sync
+      - name: gerar config + pywrangler sync (pacotes Pyodide)
+        run: |
+          uv run --no-project ci/render_config.py   # o pywrangler precisa do mcp/wrangler.jsonc (gerado, fora do git)
+          cd mcp && uv run pywrangler sync
       - run: bash ci/e2e.sh
       - name: logs dos Workers
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-logs
           path: .wrangler/e2e-logs/
@@ -67,11 +68,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: dry-run do deploy + limite de tamanho
         run: |
           uv run --no-project ci/render_config.py
+          mkdir -p .wrangler                          # clone limpo não tem .wrangler/ (o tee falharia com pipefail)
           cd mcp
           uv run pywrangler deploy --dry-run --outdir ../.wrangler/dryrun | tee ../.wrangler/dryrun.log
           kib=$(grep -oP 'Total Upload: \K[0-9.]+' ../.wrangler/dryrun.log)
@@ -97,7 +99,7 @@ jobs:
       D1_ID_PRODUCTION: ${{ vars.D1_ID_PRODUCTION }}
       KV_ID_PRODUCTION: ${{ vars.KV_ID_PRODUCTION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: deploy (config → migrations → auth → mcp)
         id: deploy
@@ -120,7 +122,7 @@ jobs:
       name: production
     env: *deploy-env
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: deploy (config → migrations → auth → mcp)
         id: deploy

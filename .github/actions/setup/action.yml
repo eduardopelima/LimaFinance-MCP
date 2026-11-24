@@ -3,12 +3,12 @@ description: Node + uv (com cache) e dependências de auth/ e mcp/
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v7
       with:
         node-version: 22
         cache: npm
         cache-dependency-path: auth/package-lock.json
-    - uses: astral-sh/setup-uv@v6
+    - uses: astral-sh/setup-uv@v10
       with:
         version: "0.13.9" # pywrangler exige uv >= 0.13.4
         enable-cache: true
