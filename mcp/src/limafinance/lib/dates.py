@@ -38,6 +38,26 @@ def add_months(month: str, n: int) -> str:
     return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
 
 
+RECURRENCE_HORIZON = 12  # meses gerados à frente, contando o corrente
+
+
+def recurrence_months(
+    start: str, end: str | None, current: str, *, from_month: str | None = None, horizon: int = RECURRENCE_HORIZON
+) -> list[str]:
+    """Competências que uma regra deve ter geradas: do mês corrente (ou de `from_month`, para backfill)
+    até corrente + horizon - 1, limitado a [start, end]. Meses no passado só entram com `from_month`."""
+    lo = max(start, from_month if from_month and from_month < current else current)
+    hi = add_months(current, horizon - 1)
+    if end and end < hi:
+        hi = end
+    out: list[str] = []
+    m = lo
+    while m <= hi:
+        out.append(m)
+        m = add_months(m, 1)
+    return out
+
+
 def clamp_day(month: str, day: int) -> str:
     """Dia `day` do mês limitado ao último dia (31 em fevereiro → 28/29)."""
     y, m = map(int, month.split("-"))

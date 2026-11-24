@@ -1,4 +1,4 @@
-"""Fábrica do servidor MCP (stateless: uma instância por requisição) e registro das 13 tools."""
+"""Fábrica do servidor MCP (stateless: uma instância por requisição) e registro das 14 tools."""
 
 import functools
 import json
@@ -121,13 +121,13 @@ def build_server(env: Any) -> MCPServer:
     @mcp.tool(annotations=READ)
     @guarded()
     async def month_summary(month: MonthT | None = None) -> dict:
-        """Resumo do mês de competência: entradas, saídas, saldo, gasto por categoria vs. meta e quanto resta do teto global (com R$/dia restante no mês corrente)."""
+        """Resumo do mês de competência: entradas, saídas, saldo, gasto por categoria vs. meta e quanto resta do teto global (com R$/dia restante no mês corrente). Os totais incluem lançamentos PREVISTOS (data futura, ex.: recorrências); `realizado`/`previsto` trazem a separação."""
         return await summary.month_summary(db, actor(), month)
 
     @mcp.tool(annotations=READ)
     @guarded()
     async def list_recurrences(include_ended: bool = False) -> list[dict]:
-        """Regras de lançamentos mensais (assinaturas, aluguel, salário). Por padrão só as ativas."""
+        """Regras de lançamentos mensais (assinaturas, aluguel, salário). Por padrão só as ativas. `generated_until` = último mês já gerado."""
         return await recurrences.list_recurrences(db, actor(), include_ended)
 
     # ---------------- escrita ----------------
@@ -204,20 +204,40 @@ def build_server(env: Any) -> MCPServer:
         start_month: Annotated[MonthT | None, Field(description="Padrão: mês corrente")] = None,
         end_month: Annotated[MonthT | None, Field(description="Último mês (inclusive). Omitir = sem fim")] = None,
         note: NoteT | None = None,
+        include_past_months: Annotated[bool, Field(
+            description="Se start_month está no passado, gera também os meses passados. Antes, confira com list_transactions se já não foram lançados à mão.",
+        )] = False,
     ) -> dict:
-        """Cria regra mensal (aluguel, assinatura, salário). O lançamento do mês corrente é gerado na hora; os próximos, automaticamente no início de cada mês. Meses passados NÃO são gerados."""
+        """Cria regra mensal (aluguel, assinatura, salário, parcelas). Gera na hora os lançamentos do mês corrente (ou de start_month, se futuro) até 12 meses à frente, ou até end_month; um mês novo entra a cada virada de mês. Ex.: "condomínio 400 todo dia 10 a partir de março" → start_month="03/2027", day_of_month=10. Valor diferente só em alguns meses (rateio)? Crie a regra com o valor normal e edite esses meses com update_transaction."""
         return await recurrences.create_recurrence(
             db, actor(), kind=kind, amount=amount, category=category, description=description,
             day_of_month=day_of_month, start_month=start_month, end_month=end_month, note=note,
+            include_past_months=include_past_months,
         )
 
     @mcp.tool(annotations=_write(idempotent=True))
+    @guarded(write=True)
+    async def update_recurrence(
+        id: RecIdT,
+        from_month: Annotated[MonthT | None, Field(description="Primeiro mês com a mudança (pode ser passado). Padrão: mês corrente")] = None,
+        amount: AmountT | None = None,
+        category: CategoryT | None = None,
+        description: DescriptionT | None = None,
+        day_of_month: Annotated[int | None, Field(ge=1, le=31, description="Novo dia do mês; 31 = último dia")] = None,
+    ) -> dict:
+        """Mudança PERMANENTE numa regra a partir de from_month (reajuste: "o aluguel subiu para 1.800 desde outubro"). Atualiza a regra e os lançamentos já gerados desse mês em diante, exceto os editados à mão (retornados em kept_edited: pergunte ao usuário). Mudança só em alguns meses (rateio de 3 meses)? NÃO use esta tool: edite esses lançamentos com update_transaction."""
+        return await recurrences.update_recurrence(
+            db, actor(), id, from_month=from_month, amount=amount, category=category,
+            description=description, day_of_month=day_of_month,
+        )
+
+    @mcp.tool(annotations=_write(idempotent=True, destructive=True))
     @guarded(write=True)
     async def end_recurrence(
         id: RecIdT,
         last_month: Annotated[MonthT | None, Field(description="Último mês em que vale. Padrão: mês corrente")] = None,
     ) -> dict:
-        """Encerra uma regra mensal. Lançamentos já gerados permanecem (exclua-os à parte se preciso)."""
+        """Encerra uma regra mensal e exclui (soft delete, reversível) os lançamentos gerados DEPOIS de last_month; os editados à mão são mantidos e listados. Confirme com o usuário antes."""
         return await recurrences.end_recurrence(db, actor(), id, last_month)
 
     return mcp

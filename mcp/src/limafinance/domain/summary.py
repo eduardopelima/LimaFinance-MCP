@@ -37,8 +37,8 @@ async def month_summary(db: DB, actor: Actor, month: str | None = None) -> dict:
             actor.user_id, m,
         ),
         db.stmt(
-            """SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents), 0) AS total FROM transactions
-               WHERE user_id = ? AND competence_month = ? AND deleted_at IS NULL AND kind = 'expense' AND occurred_on > ?""",
+            """SELECT kind, COUNT(*) AS n, SUM(amount_cents) AS total FROM transactions
+               WHERE user_id = ? AND competence_month = ? AND deleted_at IS NULL AND occurred_on > ? GROUP BY kind""",
             actor.user_id, m, today,
         ),
     ])
@@ -83,7 +83,8 @@ async def month_summary(db: DB, actor: Actor, month: str | None = None) -> dict:
             **_line("*", "Teto global", expense, global_budget),
             "per_day_left": format_brl(left // days_left) if days_left and left > 0 else None,
         }
-    p = pending[0] if pending else {"n": 0, "total": 0}
+    fut = {r["kind"]: (int(r["n"]), int(r["total"])) for r in pending}
+    fut_inc, fut_exp = fut.get("income", (0, 0)), fut.get("expense", (0, 0))
     return {
         "month": m,
         "today": today,
@@ -95,6 +96,15 @@ async def month_summary(db: DB, actor: Actor, month: str | None = None) -> dict:
         "saldo_do_mes": format_brl(income - expense),
         "global_budget": gb,
         "days_left_in_month": days_left,
-        "scheduled_future_expenses": {"count": int(p["n"]), "total": format_brl(int(p["total"]))},
+        # entradas/saidas INCLUEM os previstos (data real > hoje, ex.: recorrências futuras); aqui vai a separação.
+        "previsto": {
+            "count": fut_inc[0] + fut_exp[0],
+            "income_cents": fut_inc[1], "expense_cents": fut_exp[1],
+            "entradas": format_brl(fut_inc[1]), "saidas": format_brl(fut_exp[1]),
+        },
+        "realizado": {
+            "income_cents": income - fut_inc[1], "expense_cents": expense - fut_exp[1],
+            "entradas": format_brl(income - fut_inc[1]), "saidas": format_brl(expense - fut_exp[1]),
+        },
         "categories": categories,
     }

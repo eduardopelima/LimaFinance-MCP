@@ -25,14 +25,15 @@ class NewTransaction(BaseModel):
 _SELECT_VIEW = """
 SELECT t.id, t.kind, t.amount_cents, t.occurred_on, t.competence_month, t.category_id,
        CASE WHEN p.name IS NULL THEN c.name ELSE p.name || ' > ' || c.name END AS category,
-       t.description, t.note, t.recurrence_id, t.source, t.deleted_at
+       t.description, t.note, t.recurrence_id, t.recurrence_override, t.source, t.deleted_at
 FROM transactions t
 JOIN categories c ON c.id = t.category_id
 LEFT JOIN categories p ON p.id = c.parent_id"""
 
 
-def _view(r: dict[str, Any]) -> dict[str, Any]:
-    return {**r, "valor": format_brl(r["amount_cents"])}
+def _view(r: dict[str, Any], today: str) -> dict[str, Any]:
+    # previsto = data real ainda não chegou (ex.: recorrências geradas com antecedência).
+    return {**r, "valor": format_brl(r["amount_cents"]), "previsto": r["occurred_on"] > today}
 
 
 async def add_transactions(db: DB, actor: Actor, items: list[NewTransaction]) -> dict:
@@ -157,7 +158,7 @@ async def list_transactions(
     income = int(by_kind.get("income", {}).get("total") or 0)
     expense = int(by_kind.get("expense", {}).get("total") or 0)
     count = sum(int(a["n"]) for a in agg)
-    items = [_view(r) for r in rows]
+    items = [_view(r, today) for r in rows]
     return {
         "items": items,
         "count": count,
@@ -221,13 +222,16 @@ async def update_transaction(
         put("note", (note or "").strip() or None)
     if not sets:
         raise DomainError("nothing_to_update", "Nenhum campo para alterar.")
+    if before["recurrence_id"] and set(changes) - {"note"}:
+        # Exceção pontual (rateio, valor diferente num mês): o reajuste/encerramento da regra não mexe mais nele.
+        sets.append("recurrence_override = 1")
 
     await db.batch([
         db.stmt(f"UPDATE transactions SET {', '.join(sets)}, updated_at = ? WHERE user_id = ? AND id = ?",
                 *args, now_iso(), actor.user_id, txn_id),
         audit_stmt(db, actor, "transaction.update", txn_id, {"before": before, "changes": changes}),
     ])
-    return _view(await _get_owned(db, actor, txn_id))
+    return _view(await _get_owned(db, actor, txn_id), today)
 
 
 async def set_deleted(db: DB, actor: Actor, ids: list[str], deleted: bool) -> dict:

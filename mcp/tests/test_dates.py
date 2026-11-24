@@ -66,3 +66,25 @@ def test_helpers():
     assert clamp_day("2025-02", 31) == "2025-02-28"
     assert clamp_day("2024-02", 30) == "2024-02-29"
     assert clamp_day("2025-04", 5) == "2025-04-05"
+
+
+# ---------- janela de recorrência (12 meses à frente) ----------
+from limafinance.lib.dates import recurrence_months  # noqa: E402
+
+
+def test_recurrence_window_no_end_is_12_months_from_current():
+    ms = recurrence_months("2025-01", None, "2026-11")
+    assert ms[0] == "2026-11" and ms[-1] == "2027-10" and len(ms) == 12
+
+
+def test_recurrence_window_future_start_and_end():
+    assert recurrence_months("2027-03", None, "2026-11") == ["2027-03", "2027-04", "2027-05", "2027-06", "2027-07", "2027-08", "2027-09", "2027-10"]
+    assert recurrence_months("2026-12", "2027-02", "2026-11") == ["2026-12", "2027-01", "2027-02"]
+    assert recurrence_months("2028-01", None, "2026-11") == []  # além do horizonte: entra quando a janela chegar
+    assert recurrence_months("2025-01", "2026-10", "2026-11") == []  # já terminou
+
+
+def test_recurrence_window_backfill_only_with_from_month():
+    assert recurrence_months("2026-09", None, "2026-11")[0] == "2026-11"
+    ms = recurrence_months("2026-09", None, "2026-11", from_month="2026-09")
+    assert ms[:3] == ["2026-09", "2026-10", "2026-11"] and ms[-1] == "2027-10"

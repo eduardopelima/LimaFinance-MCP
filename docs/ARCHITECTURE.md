@@ -6,7 +6,7 @@
  Claude (web/desktop/Code) ─┐                        ┌─────────────────────────────────────────────┐
  ChatGPT (dev mode)        ─┼── HTTPS /mcp ─────────▶│ Worker "limafinance" (PYTHON)               │
  Gemini CLI                ─┘                        │  /mcp  MCPServer (SDK mcp 2.x) stateless     │
-        │                                            │        13 tools · Pydantic · domínio · SQL   │
+        │                                            │        14 tools · Pydantic · domínio · SQL   │
         │ 401 → /.well-known/oauth-protected-resource│  auth: PAT "lf_pat_…" (D1)                   │
         │      aponta para o authorization server    │        ou OAuth ──RPC──┐                     │
         ▼                                            │  cron 03:00 UTC ─▶ Queue ─▶ consumer         │
@@ -31,7 +31,7 @@
 | 7 | **PAT para bearer fixo** | Claude Code e Gemini CLI aceitam header. O token é guardado como SHA-256 e validado no Python. Escopo só-leitura opcional. |
 | 8 | **Multi-tenant desde o dia 1** | `user_id` em todas as tabelas. Vem do token, nunca de parâmetro de tool. O auth só conhece o e-mail, e o Python cria/acha o usuário. |
 | 9 | **Livro-razão único** | Entrada e saída na mesma tabela, `kind` + `amount_cents > 0`. Competência separada da data real. |
-| 10 | **Recorrência = regra materializada** | Gera lançamentos reais com a chave `rec:<id>:<mês>`. Resumo simples, cada lançamento editável isoladamente. |
+| 10 | **Recorrência = regra materializada** | Gera lançamentos reais com a chave `rec:<id>:<mês>`, do mês corrente até 12 meses à frente (o cron diário rola a janela). A regra guarda o valor padrão; exceção pontual (rateio) = editar o lançamento, que vira `recurrence_override` e nunca é sobrescrito; reajuste = `update_recurrence` (regra + meses gerados ≥ `from_month`, exceto os editados). Lançamento com data futura sai como `previsto`. |
 | 11 | **Queue já na v1** | O cron faz fan-out de um job por usuário. Pronto para N usuários. Jobs novos entram em `jobs.py`. |
 | 12 | **Escrita segura** | Soft delete, idempotency_key, lote atômico, validação total antes de gravar, `audit_log` no mesmo batch, escopo `mcp:write`. |
 | 13 | **Import por script** | `mcp/scripts/import_planilha.py` (CPython, reaproveita `limafinance.lib`): CSV pt-BR → SQL idempotente, dry-run por padrão. |
@@ -59,21 +59,23 @@ PR ──▶ test ─┐
 - **Pacotes**: só puros ou compilados para Pyodide. Toda dependência nova precisa ser testada com `pywrangler dev`.
 - **Cron local**: Python Worker não tem `/__scheduled`. Usa-se a API local do wrangler (ver `CLAUDE.md`).
 
-## Tools (13)
+## Tools (14)
 
 | Tool | Tipo | Notas |
 |---|---|---|
 | `get_context` | leitura | hoje (SP), mês atual, árvore de categorias. O LLM chama primeiro. |
 | `list_categories` | leitura | |
 | `list_transactions` | leitura | filtros: competência, intervalo de datas, kind, categoria (inclui subs), texto, excluídos; paginação; totais |
-| `month_summary` | leitura | entradas, saídas, saldo, por categoria vs. meta, teto global, R$/dia restante |
+| `month_summary` | leitura | entradas, saídas, saldo, por categoria vs. meta, teto global, R$/dia restante, `realizado` vs. `previsto` |
 | `list_recurrences` | leitura | |
 | `add_transactions` | escrita | lote 1–100, atômico, idempotency_key por item |
 | `update_transaction` | escrita | patch parcial |
 | `delete_transactions` / `restore_transactions` | escrita | soft delete reversível (`destructiveHint` na exclusão) |
 | `create_category` | escrita | único caminho para criar categoria |
 | `set_budget` | escrita | upsert/remove. Sem categoria = teto global |
-| `create_recurrence` / `end_recurrence` | escrita | gera o mês corrente na hora, sem backfill |
+| `create_recurrence` | escrita | gera na hora até 12 meses à frente (ou até `end_month`); `include_past_months` para backfill |
+| `update_recurrence` | escrita | reajuste permanente a partir de `from_month` (até 12 meses à frente); devolve `kept_edited` |
+| `end_recurrence` | escrita | encerra e faz soft delete dos gerados depois de `last_month` (`destructiveHint`) |
 
 ## Mapeamento da planilha
 

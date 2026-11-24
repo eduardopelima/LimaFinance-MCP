@@ -36,7 +36,7 @@ flowchart LR
   end
   subgraph Cloudflare["Sua conta Cloudflare"]
     direction LR
-    MCP["<b>limafinance</b> · Python Worker<br/>/mcp · 13 tools · Pydantic<br/>cron → Queue → consumer"]
+    MCP["<b>limafinance</b> · Python Worker<br/>/mcp · 14 tools · Pydantic<br/>cron → Queue → consumer"]
     AUTH["<b>limafinance-auth</b> · TS Worker<br/>OAuth 2.1 · DCR · CIMD · PKCE<br/>login Google + allowlist"]
     D1[(D1<br/>livro-razão)]
     KV[(KV<br/>grants OAuth)]
@@ -108,21 +108,23 @@ PAT para clientes com header fixo: `cd mcp && uv run scripts/create_token.py --e
 (dry-run com relatório; adicione `--apply --env production` para gravar). Formato: [`mcp/scripts/exemplo-planilha.csv`](mcp/scripts/exemplo-planilha.csv).
 
 <details>
-<summary><b>As 13 tools</b></summary>
+<summary><b>As 14 tools</b></summary>
 
 | Tool | Tipo | |
 |---|---|---|
 | `get_context` | leitura | hoje (fuso do usuário), mês atual, árvore de categorias |
 | `list_categories` | leitura | |
 | `list_transactions` | leitura | competência, datas, tipo, categoria (inclui subs), texto, excluídos, paginação, totais |
-| `month_summary` | leitura | entradas, saídas, saldo, categoria vs. meta, teto global, R$/dia |
+| `month_summary` | leitura | entradas, saídas, saldo, categoria vs. meta, teto global, R$/dia, realizado vs. previsto |
 | `list_recurrences` | leitura | |
 | `add_transactions` | escrita | lote 1–100 atômico, `idempotency_key` por item |
 | `update_transaction` | escrita | patch parcial |
 | `delete_transactions` / `restore_transactions` | escrita | soft delete reversível |
 | `create_category` | escrita | único caminho para criar categoria |
 | `set_budget` | escrita | meta mensal por categoria ou teto global |
-| `create_recurrence` / `end_recurrence` | escrita | regra mensal; gera o mês corrente na hora |
+| `create_recurrence` | escrita | regra mensal; gera na hora até 12 meses à frente (ou até o fim), backfill opcional |
+| `update_recurrence` | escrita | reajuste permanente a partir de um mês (pode ser passado); preserva meses editados à mão |
+| `end_recurrence` | escrita | encerra e exclui (soft delete) os lançamentos gerados depois do último mês |
 
 </details>
 

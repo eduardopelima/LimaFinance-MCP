@@ -100,7 +100,7 @@ async def mcp_session(label: str, bearer: str) -> None:
     http = create_mcp_http_client(headers={"Authorization": f"Bearer {bearer}"})
     async with Client(streamable_http_client(f"{BASE}/mcp", http_client=http)) as c:
         tools = (await c.list_tools()).tools
-        check(len(tools) == 13, f"[{label}] tools/list: {len(tools)} tools")
+        check(len(tools) == 14, f"[{label}] tools/list: {len(tools)} tools")
         ro = sorted(t.name for t in tools if t.annotations and t.annotations.read_only_hint)
         check(ro == sorted(["get_context", "list_categories", "list_transactions", "month_summary", "list_recurrences"]),
               f"[{label}] readOnlyHint só nas de leitura")

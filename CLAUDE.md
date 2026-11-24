@@ -64,7 +64,7 @@ exige as portas 8787/8788 livres, então pare os `wrangler dev` antes).
 ## Mapa (`mcp/src/`)
 
 - `entry.py`: `WorkerEntrypoint`: `fetch` (ASGI → MCP), `queue`, `scheduled`. GET/DELETE `/mcp` → 405 (stateless).
-- `limafinance/server.py`: `MCPServer` (SDK `mcp` 2.x) + registro das 13 tools + `guarded()` (erros e escopo).
+- `limafinance/server.py`: `MCPServer` (SDK `mcp` 2.x) + registro das 14 tools + `guarded()` (erros e escopo).
 - `limafinance/auth.py`: `LimaTokenVerifier` (PAT via D1, OAuth via RPC) e `current_actor()`.
 - `limafinance/schemas.py`: tipos Pydantic dos parâmetros (as descrições viram o JSON Schema que o LLM lê).
 - `limafinance/domain/`: regras de negócio + SQL. **Sem dependência de MCP**: recebe `Actor` + valores validados.
@@ -87,7 +87,8 @@ exige as portas 8787/8788 livres, então pare os `wrangler dev` antes).
 7. **Escrita segura**: soft delete (`deleted_at`), `idempotency_key` única por usuário, lote atômico via `db.batch([...])`
    (D1 batch = transação), e `audit_stmt(...)` **no mesmo batch** de toda escrita.
 8. **Valide tudo antes de escrever**: em lote, um item inválido aborta o lote inteiro, e o erro cita o item.
-9. **Jobs da Queue são idempotentes** (at-least-once). Recorrências usam a chave `rec:<id>:<YYYY-MM>`.
+9. **Jobs da Queue são idempotentes** (at-least-once). Recorrências usam a chave `rec:<id>:<YYYY-MM>` e ficam geradas
+   até 12 meses à frente. Lançamento gerado editado à mão = `recurrence_override = 1`: reajuste/encerramento não mexem nele.
 10. **Segredos**: nunca logar tokens. O PAT só existe como SHA-256. O verificador de token **falha fechado** (erro = não autenticado).
 
 ## Convenções de tools MCP
@@ -101,7 +102,7 @@ exige as portas 8787/8788 livres, então pare os `wrangler dev` antes).
   Exceção inesperada vira "Erro interno" + traceback no log.
 - Resposta: dict com centavos **e** string formatada (`valor`, `gasto`, `restante`...). O LLM não deve fazer conta.
 - Tool nova: lógica em `domain/`, tipo em `schemas.py`, registro em `server.py`, teste da parte pura em `tests/`.
-  Mantenha o total baixo (hoje são 13): prefira parâmetro a tool nova.
+  Mantenha o total baixo (hoje são 14): prefira parâmetro a tool nova.
 
 ## Python Workers: armadilhas
 

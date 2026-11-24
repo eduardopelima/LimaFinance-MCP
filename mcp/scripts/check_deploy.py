@@ -4,7 +4,7 @@
     uv run scripts/check_deploy.py --url https://limafinance.x.workers.dev   # URL explícita
 
 Checa: /health; /mcp sem token → 401 com resource_metadata; metadata RFC 9728 aponta para o AS esperado;
-AS anuncia DCR, PKCE S256 e CIMD. Com --token: sessão MCP real (13 tools, get_context, month_summary).
+AS anuncia DCR, PKCE S256 e CIMD. Com --token: sessão MCP real (14 tools, get_context, month_summary).
 Tenta de novo por até ~60 s (deploy recém-publicado pode levar alguns segundos para propagar).
 """
 
@@ -100,7 +100,7 @@ async def mcp_session(token: str) -> None:
     http = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
     async with Client(streamable_http_client(resource, http_client=http)) as c:
         tools = (await c.list_tools()).tools
-        check(len(tools) == 13, f"[pat] tools/list: {len(tools)} tools")
+        check(len(tools) == 14, f"[pat] tools/list: {len(tools)} tools")
         ctx = await c.call_tool("get_context", {})
         check(not ctx.is_error, f"[pat] get_context: {json.loads(ctx.content[0].text).get('today') if not ctx.is_error else ctx.content[0].text}")
         s = await c.call_tool("month_summary", {})
