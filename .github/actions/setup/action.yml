@@ -8,7 +8,7 @@ runs:
         node-version: 22
         cache: npm
         cache-dependency-path: auth/package-lock.json
-    - uses: astral-sh/setup-uv@v10
+    - uses: astral-sh/setup-uv@v10.4.0 # sem tag de major: fixe a versão completa
       with:
         version: "0.13.9" # pywrangler exige uv >= 0.13.4
         enable-cache: true
