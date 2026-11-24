@@ -10,6 +10,7 @@ import io
 import re
 from dataclasses import dataclass, field
 
+from limafinance.lib.errors import DomainError
 from limafinance.lib.dates import is_valid_iso_date, month_of, parse_date, parse_month
 from limafinance.lib.money import parse_amount_to_cents
 from limafinance.lib.text import normalize_key
@@ -37,6 +38,10 @@ class ParseResult:
     budget_by_month: dict[str, int] = field(default_factory=dict)  # coluna Meta Gasto (teto global)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    skipped_zero: int = 0
+    skipped_uncategorized: int = 0
+    # competência > until: não vão para transactions (ex.: planejamento); Mensais viram candidatas a recorrência
+    deferred: list[ParsedTxn] = field(default_factory=list)
 
 
 COLUMNS = {
@@ -82,7 +87,15 @@ def _month_from(raw: str, today: str) -> str:
 _ZERO = re.compile(r"^r?\$?\s*0+([.,]0+)?$", re.I)
 
 
-def parse_planilha(text: str, *, today: str, income_categories: list[str] | None = None) -> ParseResult:
+def parse_planilha(
+    text: str,
+    *,
+    today: str,
+    income_categories: list[str] | None = None,
+    default_category: str | None = None,
+    skip_uncategorized: bool = False,
+    until: str | None = None,
+) -> ParseResult:
     out = ParseResult()
     rows = parse_csv(text)
     if len(rows) < 2:
@@ -105,19 +118,35 @@ def parse_planilha(text: str, *, today: str, income_categories: list[str] | None
         line = idx + 2
         try:
             month = _month_from(get(r, "competence"), today)
-            for col in ("income", "budget"):  # valores do MÊS (podem vir repetidos em todas as linhas)
+            extra_notes: list[str] = []
+            for col, label in (("income", "Provento"), ("budget", "Meta Gasto")):  # valores do MÊS (repetidos nas linhas)
                 raw = get(r, col)
                 if raw and raw != "-" and not _ZERO.match(raw):
-                    month_values[col].setdefault(month, set()).add(parse_amount_to_cents(raw.lstrip("-")))
+                    try:
+                        cents = parse_amount_to_cents(raw.lstrip("-"))  # parse ANTES: valor inválido não deixa mês vazio
+                    except DomainError:
+                        # anotação solta na coluna de valor (ex.: "A FECHAR"): não é valor; vira nota da linha
+                        out.warnings.append(f'Linha {line}: "{raw}" na coluna {label} não é valor; guardado na nota.')
+                        extra_notes.append(f"{label}: {raw}")
+                        continue
+                    month_values[col].setdefault(month, set()).add(cents)
 
             raw_amount = get(r, "amount")
             if not raw_amount:
                 continue  # linha só com Provento/Meta
+            if _ZERO.match(raw_amount.replace(" ", "")):
+                out.warnings.append(f"Linha {line}: valor zero ({get(r, 'description') or get(r, 'category')}) ignorado.")
+                out.skipped_zero += 1
+                continue
             negative = bool(re.match(r"^\s*-|\(", raw_amount))
             cents = parse_amount_to_cents(re.sub(r"[()]", "", re.sub(r"^\s*-\s*", "", raw_amount)))
-            category = get(r, "category")
+            category = get(r, "category") or (default_category or "")
             if not category:
-                raise ValueError("Categoria vazia")
+                if skip_uncategorized:
+                    out.warnings.append(f"Linha {line}: sem categoria ({get(r, 'description')}) ignorada.")
+                    out.skipped_uncategorized += 1
+                    continue
+                raise ValueError("Categoria vazia (use --default-category ou --skip-uncategorized)")
             kind = "income" if normalize_key(category) in income_keys else "expense"
             if negative:
                 out.warnings.append(f'Linha {line}: valor negativo "{raw_amount}" importado como {kind} de {cents / 100:.2f}. Confira.')
@@ -136,7 +165,7 @@ def parse_planilha(text: str, *, today: str, income_categories: list[str] | None
 
             out.transactions.append(ParsedTxn(
                 line=line, kind=kind, amount_cents=cents, occurred_on=occurred, competence_month=month,
-                category=category, subcategory=sub, description=description, note=get(r, "note") or None,
+                category=category, subcategory=sub, description=description, note=" · ".join(filter(None, [get(r, "note"), *extra_notes])) or None,
                 monthly=normalize_key(get(r, "occurrence")) == "mensal", idempotency_key=key,
             ))
         except Exception as e:
@@ -150,4 +179,11 @@ def parse_planilha(text: str, *, today: str, income_categories: list[str] | None
                 out.errors.append(f"{label} de {month} tem valores diferentes entre linhas ({vals}). Deixe um só valor por mês.")
             else:
                 target[month] = next(iter(values))
+
+    if until:
+        out.deferred = [t for t in out.transactions if t.competence_month > until]
+        out.transactions = [t for t in out.transactions if t.competence_month <= until]
+        for target in (out.income_by_month, out.budget_by_month):
+            for m in [m for m in target if m > until]:
+                del target[m]
     return out

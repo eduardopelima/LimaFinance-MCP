@@ -8,6 +8,7 @@ Reexecutar é seguro: chaves de idempotência determinísticas; categorias e met
 """
 
 import argparse
+import hashlib
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")  # console do Windows (cp1252)
@@ -26,16 +27,23 @@ p.add_argument("--file", required=True)
 p.add_argument("--email", required=True)
 p.add_argument("--income-categories", default="")
 p.add_argument("--provento-category", default="Proventos")
+p.add_argument("--default-category", help="categoria para linhas sem categoria (criada se não existir)")
+p.add_argument("--skip-uncategorized", action="store_true", help="ignora (com aviso) linhas sem categoria")
+p.add_argument("--until", help="último mês de competência importado (YYYY-MM); meses depois são adiados")
+p.add_argument("--recurrences-from-deferred", action="store_true",
+               help="linhas Mensal adiadas por --until viram regras de recorrência a partir do mês delas")
 p.add_argument("--apply", action="store_true")
 p.add_argument("--env", default="local", choices=["local", "staging", "production"])
 a = p.parse_args()
 
 email = a.email.strip().lower()
 income_categories = [s.strip() for s in a.income_categories.split(",") if s.strip()]
-r = parse_planilha(Path(a.file).read_text(encoding="utf-8-sig"), today=today_in(), income_categories=income_categories)
+r = parse_planilha(Path(a.file).read_text(encoding="utf-8-sig"), today=today_in(), income_categories=income_categories,
+                   default_category=a.default_category, skip_uncategorized=a.skip_uncategorized, until=a.until)
 
 print(f"Linhas de lançamento: {len(r.transactions)}")
-print(f"Meses com Provento: {len(r.income_by_month)} | com Meta Gasto: {len(r.budget_by_month)}")
+print(f"Meses com Provento: {len(r.income_by_month)} | com Meta Gasto: {len(r.budget_by_month)} | valor zero ignorado: {r.skipped_zero}"
+      f" | sem categoria ignorado: {r.skipped_uncategorized} | adiados (> {a.until or '-'}): {len(r.deferred)}")
 for w in r.warnings:
     print("AVISO", w)
 if r.errors:
@@ -58,7 +66,8 @@ lines = [f"INSERT INTO users (id, email) VALUES ({sql(random_id('usr'))}, {sql(e
 
 roots: dict[str, tuple[str, str]] = {}
 subs: dict[str, tuple[str, str, str]] = {}
-for t in r.transactions:
+rec_rows = [t for t in r.deferred if t.monthly] if a.recurrences_from_deferred else []
+for t in [*r.transactions, *rec_rows]:
     roots[f"{t.kind}|{normalize_key(t.category)}"] = (t.category.strip(), t.kind)
     if t.subcategory:
         subs[f"{t.kind}|{normalize_key(t.category)}|{normalize_key(t.subcategory)}"] = (t.category, t.subcategory.strip(), t.kind)
@@ -87,6 +96,18 @@ for month, cents in r.budget_by_month.items():
     lines.append(f"""INSERT INTO budgets (id, user_id, month, category_id, category_key, amount_cents)
 SELECT {sql(random_id('bud'))}, {U}, {sql(month)}, NULL, '*', {cents} WHERE true
 ON CONFLICT (user_id, month, category_key) DO UPDATE SET amount_cents = excluded.amount_cents;""")
+_B32 = "0123456789abcdefghjkmnpqrstvwxyz"
+rec_seen: dict[str, int] = {}
+for t in rec_rows:
+    # ID determinístico (mesmo formato rec_ + 22 chars): reimportar não duplica a regra.
+    base = "|".join([email, normalize_key(t.category), normalize_key(t.subcategory or ""), normalize_key(t.description)])
+    rec_seen[base] = rec_seen.get(base, 0) + 1
+    digest = hashlib.sha256(f"{base}|{rec_seen[base]}".encode()).digest()
+    rid = "rec_" + "".join(_B32[b % 32] for b in digest[:22])
+    cat = sub_id(t.category, t.subcategory, t.kind) if t.subcategory else root_id(t.category, t.kind)
+    lines.append(f"""INSERT INTO recurrences (id, user_id, kind, amount_cents, category_id, description, note, day_of_month, start_month, end_month)
+SELECT {sql(rid)}, {U}, {sql(t.kind)}, {t.amount_cents}, {cat}, {sql(t.description)}, {sql(t.note)}, {int(t.occurred_on[8:10])}, {sql(t.competence_month)}, NULL WHERE true
+ON CONFLICT (id) DO NOTHING;""")
 lines.append(f"INSERT INTO audit_log (user_id, actor, action, entity_id, payload) SELECT {U}, 'import', 'import.run', {sql(a.file)}, {sql(json.dumps({'rows': len(r.transactions)}))};")
 
 out_dir = MCP_DIR / "import-out"
@@ -113,6 +134,12 @@ for t in (x for x in r.transactions if x.monthly):
         monthly[k] = (" > ".join(filter(None, [t.category, t.subcategory])), t.description, t.competence_month, t.amount_cents)
 report += ["", "Candidatas a recorrência (Ocorrência=Mensal) — crie via create_recurrence com start_month APÓS o último mês importado:"]
 report += [f"  - {cat}: {desc} ({format_brl(c)}, último: {last})" for cat, desc, last, c in monthly.values()]
+if r.deferred:
+    report += ["", f"Adiados (competência > {a.until}) — NÃO gravados como lançamentos:"]
+    report += [f"  - {t.competence_month} {' > '.join(filter(None, [t.category, t.subcategory]))}: {t.description} ({format_brl(t.amount_cents)})"
+               f"{' [Mensal → recorrência]' if t in rec_rows else ''}" for t in r.deferred]
+if rec_rows:
+    report += ["", f"Recorrências criadas: {len(rec_rows)} (dia do mês = dia da data da linha, ou 1). Gerenciáveis por list_recurrences/end_recurrence."]
 (out_dir / "report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
 print("\n" + "\n".join(report))
 print(f"\nSQL gerado: {sql_path} ({len(lines)} statements).")
