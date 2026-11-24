@@ -156,7 +156,9 @@ def check_google(cfg: dict, env: str, env_file: Path) -> None:
         f"{env_file.name}:\n"
         "   console.cloud.google.com → APIs & Services → Credentials → Create credentials → OAuth client ID → Web application\n"
         f"   Authorized redirect URI: {u['issuer']}/oauth/google/callback\n"
-        "   (para testar local, adicione também http://localhost:8788/oauth/google/callback)\n"
+        "   Opcional: http://localhost:8788/oauth/google/callback, só para testar o login Google com o auth local\n"
+        "   (no dev local o login dev já basta).\n"
+        "   NÃO marque 'cliente para agentes de IA': o Google aqui só identifica o usuário; o agente recebe token do limafinance.\n"
         "   Se pedir 'OAuth consent screen': tipo External, adicione seu e-mail como test user."
     )
 

@@ -74,7 +74,7 @@ O instalador verifica cada passo antes de agir e pula o que já está pronto: cr
 algo que só você pode fazer, para com uma linha `NEEDS:` (exit 2) e o comando exato:
 
 1. `npx wrangler login`
-2. criar o OAuth client do Google (ele imprime o redirect URI) e colar o Client ID no `limafinance.env`
+2. criar o OAuth client do Google ("Aplicativo da Web"; ele imprime o redirect URI) e colar o Client ID no `limafinance.env`
 3. `npx wrangler secret put GOOGLE_CLIENT_SECRET` e `ALLOWED_EMAILS` (você digita no prompt oculto)
 
 No fim ele imprime a URL `https://<prefixo>.<subdominio>.workers.dev/mcp`.
